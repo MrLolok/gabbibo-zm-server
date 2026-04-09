@@ -1,2 +1,6 @@
 *.gsc
 !_bo2_server.gsc
+!ee/
+!ee/*.gsc
+!ee/maps/
+!ee/maps/*.gsc

@@ -7,6 +7,7 @@
 #include maps\mp\zombies\_zm_perks;
 #include maps\mp\zombies\_zm_weapons;
 #include maps\mp\zombies\_zm_powerups;
+#include ee\ee_assistant;
 
 init()
 {
@@ -26,6 +27,7 @@ init()
     level thread chat_command_listener();
     level thread remove_quick_revive_limit(); 
     level thread global_hitmarker_manager(); 
+    level thread ee\ee_assistant::init();
 }
 
 onPlayerConnect()
@@ -85,7 +87,7 @@ chat_command_listener()
         // ------------------------------------------
         if(command == ".help" || command == ".cmds")
         {
-            player iprintln("^3Giocatore: ^7.pay <nome> <pt>, .save, .load, .third, .fog, .run, .join");
+            player iprintln("^3Giocatore: ^7.pay <nome> <pt>, .save, .load, .third, .fog, .run, .mud, .join");
             player iprintln("^3Admin: ^7.god, .fly, .ignore, .ammo, .perks, .speed <n>, .kick, .unban");
             player iprintln("^3Server: ^7.map <nome>, .round <n>, .killall, .bring, .drop <tipo>, .snow");
             player iprintln("^3Armi: ^7.pap, .shield, .mk2, .galil, .an94, .ms, .monkeys, .staff");
@@ -515,6 +517,34 @@ chat_command_listener()
                 player iprintln("^1Corsa Infinita DISATTIVATA.");
             }
         }
+        else if(command == ".mud" || command == ".nomud" || command == ".trenches")
+        {
+            if ( level.script != "zm_tomb" )
+            {
+                player iprintln("^1Errore: Questo comando funziona solo su Origins.");
+                continue;
+            }
+
+            if(!isDefined(player.origins_no_mud) || player.origins_no_mud == false)
+            {
+                player.origins_no_mud = true;
+                player thread maintain_origins_no_mud();
+                player iprintln("^2No-Mud ATTIVATO! Le trincee di Origins non ti rallentano.");
+            }
+            else
+            {
+                player.origins_no_mud = false;
+                player notify("stop_origins_no_mud");
+
+                if(!isDefined(player.speed_buff_active) || player.speed_buff_active == false)
+                {
+                    player.custom_speed = 1.0;
+                    player setMoveSpeedScale(1.0);
+                }
+
+                player iprintln("^1No-Mud DISATTIVATO.");
+            }
+        }
         else if(command == ".fly" || command == ".noclip")
         {
             if(!isDefined(player.is_flying) || player.is_flying == false)
@@ -855,6 +885,33 @@ maintain_speed()
             if(self getMoveSpeedScale() != 1.5) { self setMoveSpeedScale(1.5); }
         }
         wait 0.1; 
+    }
+}
+
+maintain_origins_no_mud()
+{
+    self endon("disconnect");
+    self endon("death");
+    self endon("stop_origins_no_mud");
+    level endon("end_game");
+
+    for(;;)
+    {
+        if(level.script != "zm_tomb")
+            return;
+
+        if(!isDefined(self.origins_no_mud) || self.origins_no_mud == false)
+            return;
+
+        if(!isDefined(self.speed_buff_active) || self.speed_buff_active == false)
+        {
+            if(self getMoveSpeedScale() < 1.0)
+            {
+                self setMoveSpeedScale(1.0);
+            }
+        }
+
+        wait 0.05;
     }
 }
 

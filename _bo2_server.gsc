@@ -19,7 +19,7 @@ init()
     // ==========================================
     // SERVER CONFIGURATION
     // ==========================================
-    level.perk_purchase_limit = 10; 
+    level.perk_purchase_limit = 999; 
     level.host_only_commands = false; // true = Host Only, false = Everyone
 
     level thread onPlayerConnect();
@@ -85,14 +85,14 @@ chat_command_listener()
         // ------------------------------------------
         if(command == ".help" || command == ".cmds")
         {
-            player iprintln("^3Giocatore: ^7.pay <nome> <pt>, .save, .load, .tp, .fog, .run, .join");
+            player iprintln("^3Giocatore: ^7.pay <nome> <pt>, .save, .load, .third, .fog, .run, .join");
             player iprintln("^3Admin: ^7.god, .fly, .ignore, .ammo, .perks, .speed <n>, .kick, .unban");
             player iprintln("^3Server: ^7.map <nome>, .round <n>, .killall, .bring, .drop <tipo>, .snow");
             player iprintln("^3Armi: ^7.pap, .shield, .mk2, .galil, .an94, .ms, .monkeys, .staff");
             continue;
         }
 
-        if(command == ".pay" || command == ".dar")
+        if(command == ".pay")
         {
             if(args.size >= 3)
             {
@@ -119,6 +119,63 @@ chat_command_listener()
         {
             player.sessionstate = "playing";
             player iprintlnbold("^2[Join] ^7Sei entrato in gioco, " + player.name + "!");
+            continue;
+        }
+
+        if(command == ".dropweapon")
+        {
+            current_weapon = player GetCurrentWeapon();
+            if(current_weapon != "none" && current_weapon != "knife_zm")
+            {
+                player DropItem(current_weapon);
+                player iprintln("^2Hai lanciato la tua arma a terra.");
+            }
+            else { player iprintln("^1Errore: Non puoi lanciare questa arma."); }
+            continue;
+        }
+
+        if(command == ".deposit")
+        {
+            if(!isDefined(level.player_bank)) { level.player_bank = []; }
+            if(!isDefined(level.player_bank[player.name])) { level.player_bank[player.name] = 0; }
+            
+            if(args.size > 1)
+            {
+                amount = 0;
+                if(args[1] == "all") { amount = player.score; }
+                else { amount = int(args[1]); }
+                
+                if(amount > 0 && player.score >= amount)
+                {
+                    player maps\mp\zombies\_zm_score::minus_to_player_score(amount);
+                    level.player_bank[player.name] += amount;
+                    player iprintln("^2Hai depositato " + amount + " pt. Saldo: " + level.player_bank[player.name]);
+                }
+                else { player iprintln("^1Errore: Punti insufficienti."); }
+            }
+            else { player iprintln("^3Banca: ^7Saldo attuale: ^2" + level.player_bank[player.name] + " pt."); }
+            continue;
+        }
+
+        if(command == ".withdraw")
+        {
+            if(!isDefined(level.player_bank)) { level.player_bank = []; }
+            if(!isDefined(level.player_bank[player.name])) { level.player_bank[player.name] = 0; }
+            
+            if(args.size > 1)
+            {
+                amount = 0;
+                if(args[1] == "all") { amount = level.player_bank[player.name]; }
+                else { amount = int(args[1]); }
+                
+                if(amount > 0 && level.player_bank[player.name] >= amount)
+                {
+                    level.player_bank[player.name] -= amount;
+                    player maps\mp\zombies\_zm_score::add_to_player_score(amount);
+                    player iprintln("^2Hai prelevato " + amount + " pt. Saldo: " + level.player_bank[player.name]);
+                }
+                else { player iprintln("^1Errore: Saldo insufficiente."); }
+            }
             continue;
         }
 
@@ -158,7 +215,7 @@ chat_command_listener()
         // ------------------------------------------
         // ORIGINS STAFFS FIX
         // ------------------------------------------
-        if(command == ".staff" || command == ".baston")
+        if(command == ".staff")
         {
             if ( level.script != "zm_tomb" )
             {
@@ -213,7 +270,7 @@ chat_command_listener()
                 player iprintln("^2Ray Gun Mark II equipaggiata!");
             } else { player iprintln("^1Errore: La Mark II non è disponibile in questa mappa."); }
         }
-        else if(command == ".bring" || command == ".traer")
+        else if(command == ".bring")
         {
             players = get_players();
             foreach(p in players)
@@ -226,7 +283,12 @@ chat_command_listener()
             }
             player iprintln("^2Tutti i giocatori teletrasportati alla tua posizione!");
         }
-        else if(command == ".killall" || command == ".matar")
+        else if(command == ".reset" || command == ".restart")
+        {
+            player iprintln("^2Riavvio della mappa in corso...");
+            map_restart(false);
+        }
+        else if(command == ".killall")
         {
             zombies = GetAiSpeciesArray( "axis", "all" );
             if(isDefined(zombies))
@@ -234,6 +296,18 @@ chat_command_listener()
                 foreach(z in zombies) { z DoDamage(z.health + 666, z.origin, player); }
             }
             player iprintln("^2Tutti gli zombie eliminati!");
+        }
+        else if(command == ".opendoors")
+        {
+            zombie_doors = GetEntArray( "zombie_door", "targetname" );
+            if(isDefined(zombie_doors)) {
+                foreach(door in zombie_doors) { door notify("trigger", player, 1); }
+            }
+            zombie_debris = GetEntArray( "zombie_debris", "targetname" );
+            if(isDefined(zombie_debris)) {
+                foreach(debris in zombie_debris) { debris notify("trigger", player, 1); }
+            }
+            player iprintln("^2Tutte le porte e ostacoli sono stati aperti!");
         }
         else if(command == ".kick" || command == ".ban")
         {
@@ -273,18 +347,18 @@ chat_command_listener()
             }
             else { player iprintln("^3Uso: ^7.unban <nome>"); }
         }
-        else if(command == ".map" || command == ".mappa")
+        else if(command == ".map")
         {
             if(args.size > 1)
             {
                 map_req = tolower(args[1]);
                 map_id = "";
                 
-                if(map_req == "origins" || map_req == "tomb") { map_id = "zm_tomb"; setdvar("ui_zm_gamemodegroup", "zclassic"); }
-                else if(map_req == "mob" || map_req == "motd" || map_req == "prison") { map_id = "zm_prison"; setdvar("ui_zm_gamemodegroup", "zclassic"); }
-                else if(map_req == "buried" || map_req == "resolution") { map_id = "zm_buried"; setdvar("ui_zm_gamemodegroup", "zclassic"); }
-                else if(map_req == "dierise" || map_req == "highrise") { map_id = "zm_highrise"; setdvar("ui_zm_gamemodegroup", "zclassic"); }
-                else if(map_req == "nuketown" || map_req == "nuked") { map_id = "zm_nuked"; setdvar("ui_zm_gamemodegroup", "zclassic"); }
+                if(map_req == "origins" || map_req == "tomb") { map_id = "zm_tomb"; setdvar("ui_zm_mapstartlocation", "tomb"); setdvar("ui_zm_gamemodegroup", "zclassic"); }
+                else if(map_req == "mob" || map_req == "motd" || map_req == "prison") { map_id = "zm_prison"; setdvar("ui_zm_mapstartlocation", "prison"); setdvar("ui_zm_gamemodegroup", "zclassic"); }
+                else if(map_req == "buried" || map_req == "resolution") { map_id = "zm_buried"; setdvar("ui_zm_mapstartlocation", "resolution"); setdvar("ui_zm_gamemodegroup", "zclassic"); }
+                else if(map_req == "dierise" || map_req == "highrise") { map_id = "zm_highrise"; setdvar("ui_zm_mapstartlocation", "roof"); setdvar("ui_zm_gamemodegroup", "zclassic"); }
+                else if(map_req == "nuketown" || map_req == "nuked") { map_id = "zm_nuked"; setdvar("ui_zm_mapstartlocation", "nuked"); setdvar("ui_zm_gamemodegroup", "zclassic"); }
                 else if(map_req == "tranzit" || map_req == "transit") { map_id = "zm_transit"; setdvar("ui_zm_mapstartlocation", "transit"); setdvar("ui_zm_gamemodegroup", "zclassic"); }
                 else if(map_req == "town") { map_id = "zm_transit"; setdvar("ui_zm_mapstartlocation", "town"); setdvar("ui_zm_gamemodegroup", "zsurvival"); }
                 else if(map_req == "farm") { map_id = "zm_transit"; setdvar("ui_zm_mapstartlocation", "farm"); setdvar("ui_zm_gamemodegroup", "zsurvival"); }
@@ -307,7 +381,7 @@ chat_command_listener()
                 player iprintln("^3Uso: ^7.map <origins/mob/buried/dierise/nuketown/tranzit/town/farm>");
             }
         }
-        else if(command == ".round" || command == ".ronda")
+        else if(command == ".round")
         {
             if(args.size > 1)
             {
@@ -358,7 +432,7 @@ chat_command_listener()
             player SwitchToWeapon("m1911_upgraded_zm");
             player iprintln("^2Mustang & Sally pronte!");
         }
-        else if(command == ".monkeys" || command == ".monos")
+        else if(command == ".monkeys")
         {
             player maps\mp\zombies\_zm_weapons::weapon_give("cymbal_monkey_zm");
             player iprintln("^2Scimmiette Spaziali ricevute!");
@@ -399,6 +473,21 @@ chat_command_listener()
                 maps\mp\zombies\_zm_powerups::specific_powerup_drop( drop_type, player.origin );
                 player iprintln("^2Drop generato: " + drop_type);
             } else { player iprintln("^1Drop non supportato in questa mappa."); }
+        }
+        else if(command == ".parts" || command == ".esp")
+        {
+            if(!isDefined(player.parts_esp) || player.parts_esp == false)
+            {
+                player.parts_esp = true;
+                player thread parts_esp_monitor();
+                player iprintln("^2Ricerca Pezzi ATTIVATA!");
+            }
+            else
+            {
+                player.parts_esp = false;
+                player notify("stop_parts_esp");
+                player iprintln("^1Ricerca Pezzi DISATTIVATA.");
+            }
         }
         else if(command == ".fog")
         {
@@ -441,6 +530,21 @@ chat_command_listener()
         }
         else if(command == ".tp")
         {
+            if(args.size > 1)
+            {
+                target_name = args[1];
+                target = get_player_by_name(target_name);
+                if(isDefined(target) && target != player)
+                {
+                    player SetOrigin(target.origin);
+                    player iprintln("^2Sei stato teletrasportato da " + target.name);
+                }
+                else { player iprintln("^1Errore: Giocatore non trovato."); }
+            }
+            else { player iprintln("^3Uso: ^7.tp <nome>"); }
+        }
+        else if(command == ".third")
+        {
             if(!isDefined(player.thirdperson) || player.thirdperson == false)
             {
                 player.thirdperson = true;
@@ -469,7 +573,7 @@ chat_command_listener()
                 player iprintln("^1Errore: Nessuna posizione salvata. Usa .save prima.");
             }
         }
-        else if(command == ".ignore")
+        else if(command == ".ignore" || command == ".afk")
         {
             if(!isDefined(player.ignoreme) || player.ignoreme == false) {
                 player.ignoreme = true;
@@ -526,7 +630,7 @@ chat_command_listener()
                 player iprintln("^1Godmode DISATTIVATA.");
             }
         }
-        else if(command == ".points" || command == ".puntos")
+        else if(command == ".points")
         {
             points_to_give = 50000; 
             if (args.size > 1) { points_to_give = int(args[1]); }
@@ -729,6 +833,7 @@ remove_quick_revive_limit()
     for(;;)
     {
         if ( isDefined( level.solo_lives_given ) ) { level.solo_lives_given = 0; }
+        level.perk_purchase_limit = 999;
         wait 1; 
     }
 }
@@ -984,5 +1089,57 @@ ezz_bars_hud()
         }
 
         wait 0.05; 
+    }
+}
+
+parts_esp_monitor()
+{
+    self endon("disconnect");
+    self endon("stop_parts_esp");
+    level endon("end_game");
+
+    keywords = [];
+    keywords[0] = "part";
+    keywords[1] = "buildable";
+    keywords[2] = "piece";
+    keywords[3] = "craftable";
+    keywords[4] = "staff";
+    keywords[5] = "record";
+    keywords[6] = "crystal";
+    keywords[7] = "plane";
+    keywords[8] = "key";
+    keywords[9] = "turbine";
+    keywords[10] = "shield";
+    keywords[11] = "engine";
+    keywords[12] = "rotor";
+    keywords[13] = "battery";
+    keywords[14] = "tank";
+    keywords[15] = "wire";
+
+    for(;;)
+    {
+        models = GetEntArray("script_model", "classname");
+        foreach(m in models)
+        {
+            if(isDefined(m.model))
+            {
+                name = tolower(m.model);
+                found = false;
+                for(i = 0; i < keywords.size; i++)
+                {
+                    if(issubstr(name, keywords[i]))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                
+                if(found)
+                {
+                    Print3d(m.origin + (0, 0, 15), "[ PEZZO ]", (0, 1, 0), 1, 1.5, 2);
+                }
+            }
+        }
+        wait 0.1; 
     }
 }

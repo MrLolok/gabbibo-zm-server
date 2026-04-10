@@ -1,3 +1,6 @@
+#include maps\mp\_utility;
+#include common_scripts\utility;
+
 make_step(id, title, short_desc, long_desc)
 {
     step = SpawnStruct();

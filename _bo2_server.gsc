@@ -7,10 +7,15 @@
 #include maps\mp\zombies\_zm_perks;
 #include maps\mp\zombies\_zm_weapons;
 #include maps\mp\zombies\_zm_powerups;
-#include ee\ee_assistant;
+#include scripts\zm\ee\ee_assistant;
 
 init()
 {
+    // ==========================================
+    // GLOBAL SETTINGS
+    // ==========================================
+    level.player_out_of_playable_area_monitor = false;
+
     // ==========================================
     // PRECACHE TEXTURES (Prevents crashing)
     // ==========================================
@@ -27,7 +32,10 @@ init()
     level thread chat_command_listener();
     level thread remove_quick_revive_limit(); 
     level thread global_hitmarker_manager(); 
-    level thread ee\ee_assistant::init();
+    level thread scripts\zm\ee\ee_assistant::ee_init();
+
+    // Precachiamo gli shader per la nuova help HUD
+    PrecacheShader("black");
 }
 
 onPlayerConnect()
@@ -35,7 +43,9 @@ onPlayerConnect()
     for (;;)
     {
         level waittill("connecting", player);
+        player notifyOnPlayerCommand("toggle_parts_key", "+smoke");
         player thread onplayerspawned();
+        player thread parts_toggle_key_monitor();
     }
 }
 
@@ -87,10 +97,7 @@ chat_command_listener()
         // ------------------------------------------
         if(command == ".help" || command == ".cmds")
         {
-            player iprintln("^3Giocatore: ^7.pay <nome> <pt>, .save, .load, .third, .fog, .run, .mud, .join");
-            player iprintln("^3Admin: ^7.god, .fly, .ignore, .ammo, .perks, .speed <n>, .kick, .unban");
-            player iprintln("^3Server: ^7.map <nome>, .round <n>, .killall, .bring, .drop <tipo>, .snow");
-            player iprintln("^3Armi: ^7.pap, .shield, .mk2, .galil, .an94, .ms, .monkeys, .staff");
+            player thread toggle_help_hud();
             continue;
         }
 
@@ -197,18 +204,20 @@ chat_command_listener()
                 if(!isDefined(level.force_snow_enabled) || level.force_snow_enabled == false)
                 {
                     level.force_snow_enabled = true;
-                    level.weather_snow = 5;
+                    level.weather_snow = 1;
+                    level.weather_rain = 0;
                     level setclientfield( "snowing", 1 );
-                    level notify("weather_cycle", "snow"); // Triggers ice staff digging spots
-                    player iprintln("^2Tempesta di Neve ATTIVATA! (Prendi i pezzi del bastone).");
+                    level setclientfield( "raining", 0 );
+                    level notify( "weather_cycle" );
+                    player iprintln("^2Tempesta di Neve FORZATA! (Ora puoi scavare il Ghiaccio).");
                 }
                 else
                 {
                     level.force_snow_enabled = false;
                     level.weather_snow = 0;
                     level setclientfield( "snowing", 0 );
-                    level notify("weather_cycle", "rain");
-                    player iprintln("^1Tempesta di Neve DISATTIVATA.");
+                    level notify( "weather_cycle" );
+                    player iprintln("^1Meteo Origins riportato al ciclo naturale.");
                 }
             } else { player iprintln("^1Errore: Questo comando funziona solo su Origins."); }
             continue;
@@ -478,18 +487,7 @@ chat_command_listener()
         }
         else if(command == ".parts" || command == ".esp")
         {
-            if(!isDefined(player.parts_esp) || player.parts_esp == false)
-            {
-                player.parts_esp = true;
-                player thread parts_esp_monitor();
-                player iprintln("^2Ricerca Pezzi ATTIVATA!");
-            }
-            else
-            {
-                player.parts_esp = false;
-                player notify("stop_parts_esp");
-                player iprintln("^1Ricerca Pezzi DISATTIVATA.");
-            }
+            toggle_parts_esp(player);
         }
         else if(command == ".fog")
         {
@@ -921,11 +919,22 @@ do_noclip_logic()
     self endon("stop_noclip_logic");
     
     fly_speed = 60;
-    
+
+    // Max altitude above the point where fly was enabled. Most zombies maps
+    // (Origins in particular) have a height killbrush that bypasses
+    // EnableInvulnerability, so we clamp the linker Z to stay below it.
+    max_fly_height = 2500;
+
+    self EnableInvulnerability();
+    self.ignoreme = true;
+
+    fly_start_z = self.origin[2];
+    fly_ceiling = fly_start_z + max_fly_height;
+
     linker = spawn("script_origin", self.origin);
     self PlayerLinkTo(linker, undefined, 0, 180, 180, 180, 180);
     self DisableWeapons();
-    
+
     self thread cleanup_noclip(linker);
 
     for(;;)
@@ -946,6 +955,24 @@ do_noclip_logic()
             linker.origin = linker.origin - scaled;
         }
 
+        // Clamp altitude to keep the player below the map height killbrush.
+        if (linker.origin[2] > fly_ceiling)
+        {
+            linker.origin = (linker.origin[0], linker.origin[1], fly_ceiling);
+        }
+
+        // Melee = safe exit: teleport the player to the current fly position
+        // and terminate the noclip loop. cleanup_noclip will handle unlink +
+        // invulnerability grace period.
+        if (self MeleeButtonPressed())
+        {
+            self.fly_exit_origin = linker.origin;
+            self.is_flying = false;
+            self notify("stop_noclip_logic");
+            return;
+        }
+
+        self.health = self.maxhealth;
         wait 0.05;
     }
 }
@@ -953,8 +980,55 @@ do_noclip_logic()
 cleanup_noclip(linker)
 {
     self waittill_any("disconnect", "death", "stop_noclip_logic");
+    
+    // Capture the last fly position BEFORE deleting the linker, so we can
+    // re-snap the player there after unlinking. This prevents the engine from
+    // dropping them at a stale origin (which is what causes fall / crush deaths).
+    exit_origin = undefined;
+    if (isDefined(self) && isDefined(self.fly_exit_origin))
+    {
+        exit_origin = self.fly_exit_origin;
+        self.fly_exit_origin = undefined;
+    }
+    else if (isDefined(linker))
+    {
+        exit_origin = linker.origin;
+    }
+
+    if (isDefined(self))
+    {
+        self EnableWeapons();
+        self unlink();
+
+        if (isDefined(exit_origin))
+        {
+            self SetOrigin(exit_origin);
+        }
+    }
+
     if (isDefined(linker)) { linker delete(); }
-    if (isDefined(self)) { self EnableWeapons(); self unlink(); }
+
+    // Keep the player invulnerable for a short grace period after unlinking so
+    // that fall damage / being stuck in geometry cannot kill them while the
+    // physics settles them back on the ground.
+    if (isDefined(self))
+    {
+        self endon("disconnect");
+        grace = 0.0;
+        while (grace < 1.5)
+        {
+            self.health = self.maxhealth;
+            wait 0.05;
+            grace += 0.05;
+        }
+
+        if (!isDefined(self.godmode_active) || self.godmode_active == false)
+        {
+            self DisableInvulnerability();
+        }
+
+        self.ignoreme = false;
+    }
 }
 
 // ==========================================
@@ -1075,9 +1149,9 @@ ezz_bars_hud()
     self.hp_text.vertAlign = "bottom";
     self.hp_text.x = 0;
     self.hp_text.y = y_bottom_anchor - hp_height - shield_height - bg_padding - 2; 
-    self.hp_text.fontscale = 1.1;
-    self.hp_text.label = &"^5HP / SCUDO";
+    self.hp_text.fontscale = 0.8;
     self.hp_text.sort = 2;
+    self.hp_text.last_text = "";
 
     self.hp_bg = newClientHudElem(self);
     self.hp_bg.alignX = "center";
@@ -1145,6 +1219,8 @@ ezz_bars_hud()
             self.shield_bar.alpha = 0;
         }
 
+        update_hp_label();
+
         wait 0.05; 
     }
 }
@@ -1176,6 +1252,9 @@ parts_esp_monitor()
     for(;;)
     {
         models = GetEntArray("script_model", "classname");
+        closest_origin = undefined;
+        closest_name = "";
+
         foreach(m in models)
         {
             if(isDefined(m.model))
@@ -1193,10 +1272,208 @@ parts_esp_monitor()
                 
                 if(found)
                 {
+                    dist = int(distance(self.origin, m.origin));
+                    if(!isDefined(closest_origin) || dist < int(distance(self.origin, closest_origin)))
+                    {
+                        closest_origin = m.origin;
+                        closest_name = classify_part_name(name);
+                    }
+
                     Print3d(m.origin + (0, 0, 15), "[ PEZZO ]", (0, 1, 0), 1, 1.5, 2);
                 }
             }
         }
+
+        update_parts_focus_state(closest_origin, closest_name);
         wait 0.1; 
+    }
+}
+
+update_hp_label()
+{
+    text = "^5HP / SCUDO";
+
+    if(isDefined(self.parts_focus_text) && self.parts_focus_text != "")
+    {
+        text += "\n" + self.parts_focus_text;
+    }
+
+    if(!isDefined(self.hp_text))
+        return;
+
+    if(!isDefined(self.hp_text.last_text) || self.hp_text.last_text != text)
+    {
+        self.hp_text.last_text = text;
+        self.hp_text setText(text);
+    }
+}
+
+update_parts_focus_state(target_origin, part_name)
+{
+    if(!isDefined(target_origin))
+    {
+        self.parts_focus_text = "";
+        return;
+    }
+
+    self.parts_focus_text = "^2PART:^7 " + part_name;
+}
+
+parts_toggle_key_monitor()
+{
+    self endon("disconnect");
+
+    for(;;)
+    {
+        self waittill("toggle_parts_key");
+
+        if(!isAlive(self))
+            continue;
+
+        toggle_parts_esp(self);
+        wait 0.2;
+    }
+}
+
+classify_part_name(name)
+{
+    if(!isDefined(name) || name == "")
+        return "piece";
+
+    if(issubstr(name, "shield"))
+        return "shield";
+    if(issubstr(name, "staff"))
+        return "staff";
+    if(issubstr(name, "record"))
+        return "record";
+    if(issubstr(name, "crystal"))
+        return "crystal";
+    if(issubstr(name, "engine"))
+        return "engine";
+    if(issubstr(name, "rotor"))
+        return "rotor";
+    if(issubstr(name, "battery"))
+        return "battery";
+    if(issubstr(name, "wire"))
+        return "wire";
+    if(issubstr(name, "key"))
+        return "key";
+    if(issubstr(name, "plane"))
+        return "plane";
+    if(issubstr(name, "turbine"))
+        return "turbine";
+
+    return "part";
+}
+
+toggle_parts_esp(player)
+{
+    if(!isDefined(player.parts_esp) || player.parts_esp == false)
+    {
+        player.parts_esp = true;
+        player thread parts_esp_monitor();
+        player iprintln("^2Ricerca Pezzi ATTIVATA! ^7(bind 4 / tactical)");
+    }
+    else
+    {
+        player.parts_esp = false;
+        player notify("stop_parts_esp");
+        player.parts_focus_text = "";
+        player update_hp_label();
+        player iprintln("^1Ricerca Pezzi DISATTIVATA.");
+    }
+}
+
+toggle_help_hud()
+{
+    self endon("disconnect");
+    
+    if(!isDefined(self.help_hud_active)) self.help_hud_active = false;
+    
+    self.help_hud_active = !self.help_hud_active;
+    
+    if(self.help_hud_active)
+    {
+        self create_help_ui();
+        self iprintln("^3[Help] ^7Guida comandi aperta.");
+    }
+    else
+    {
+        self destroy_help_ui();
+        self iprintln("^3[Help] ^7Guida comandi chiusa.");
+    }
+}
+
+create_help_ui()
+{
+    self endon("disconnect");
+    flag_wait("initial_blackscreen_passed");
+    
+    self destroy_help_ui(); // Sicurezza
+    
+    self.help_ui = SpawnStruct();
+    
+    // Sfondo (Top Right)
+    self.help_ui.bg = newClientHudElem(self);
+    self.help_ui.bg.alignX = "right";
+    self.help_ui.bg.alignY = "top";
+    self.help_ui.bg.horzAlign = "user_right";
+    self.help_ui.bg.vertAlign = "user_top";
+    self.help_ui.bg.x = -10;
+    self.help_ui.bg.y = 10;
+    self.help_ui.bg setShader("white", 210, 100);
+    self.help_ui.bg.color = (0, 0, 0);
+    self.help_ui.bg.alpha = 0.6;
+    self.help_ui.bg.sort = 10;
+
+    self.help_ui.accent = newClientHudElem(self);
+    self.help_ui.accent.alignX = "right";
+    self.help_ui.accent.alignY = "top";
+    self.help_ui.accent.horzAlign = "user_right";
+    self.help_ui.accent.vertAlign = "user_top";
+    self.help_ui.accent.x = -10;
+    self.help_ui.accent.y = 10;
+    self.help_ui.accent setShader("white", 2, 100);
+    self.help_ui.accent.color = (0, 0.6, 1);
+    self.help_ui.accent.alpha = 1;
+    self.help_ui.accent.sort = 11;
+
+    self.help_ui.line1 = self create_help_line(16, &"^3Player: ^7.pay .save .load .third .fog .run .mud .join");
+    self.help_ui.line2 = self create_help_line(30, &"^3Admin: ^7.god .fly .ignore .ammo .perks .speed .kick .unban");
+    self.help_ui.line3 = self create_help_line(44, &"^3Server: ^7.map .round .killall .bring .drop .snow");
+    self.help_ui.line4 = self create_help_line(58, &"^3Armi: ^7.pap .shield .mk2 .galil .ms .monkeys .staff");
+    self.help_ui.line5 = self create_help_line(72, &"^3EE: ^7.ee .ee detail .ee hints .ee toggle");
+    self.help_ui.line6 = self create_help_line(86, &"^8(Scrivi .help per chiudere)");
+}
+
+create_help_line(y_offset, label_ref)
+{
+    line = newClientHudElem(self);
+    line.alignX = "right";
+    line.alignY = "top";
+    line.horzAlign = "user_right";
+    line.vertAlign = "user_top";
+    line.x = -15;
+    line.y = y_offset;
+    line.fontscale = 1.0;
+    line.color = (1, 1, 1);
+    line.alpha = 1;
+    line.sort = 12;
+    line.label = label_ref;
+    return line;
+}
+
+destroy_help_ui()
+{
+    if(isDefined(self.help_ui))
+    {
+        if(isDefined(self.help_ui.bg)) self.help_ui.bg destroy();
+        if(isDefined(self.help_ui.accent)) self.help_ui.accent destroy();
+        if(isDefined(self.help_ui.line1)) self.help_ui.line1 destroy();
+        if(isDefined(self.help_ui.line2)) self.help_ui.line2 destroy();
+        if(isDefined(self.help_ui.line3)) self.help_ui.line3 destroy();
+        if(isDefined(self.help_ui.line4)) self.help_ui.line4 destroy();
+        if(isDefined(self.help_ui.line5)) self.help_ui.line5 destroy();
+        self.help_ui = undefined;
     }
 }

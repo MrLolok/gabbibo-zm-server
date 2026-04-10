@@ -1,34 +1,27 @@
-#include ee\ee_progress;
+#include maps\mp\_utility;
+#include common_scripts\utility;
 
 debug_complete_active_step(player)
 {
-    step_id = ee\ee_progress::get_active_step_id();
+    step_id = scripts\zm\ee\ee_progress::get_active_step_id();
     if ( step_id == "" )
         return;
 
-    ee\ee_progress::complete_step(step_id, "debug");
+    scripts\zm\ee\ee_progress::complete_step(step_id, "debug");
     player iprintln("^3[EE Debug] ^7Step completato: " + step_id);
 }
 
 debug_complete_substep(player, step_id, substep_id)
 {
-    if ( ee\ee_progress::complete_substep(step_id, substep_id, "debug") )
+    if ( scripts\zm\ee\ee_progress::complete_substep(step_id, substep_id, "debug") )
         player iprintln("^3[EE Debug] ^7Substep completato: " + step_id + " / " + substep_id);
     else
         player iprintln("^1[EE Debug] ^7Substep non valido o gia' completato.");
 }
 
-debug_set_active_step(player, step_id)
-{
-    if ( ee\ee_progress::set_active_step(step_id) )
-        player iprintln("^3[EE Debug] ^7Step attivo impostato: " + step_id);
-    else
-        player iprintln("^1[EE Debug] ^7Step non trovato.");
-}
-
 debug_complete_step_full(player, step_id)
 {
-    if ( !ee\ee_progress::complete_step_substeps(step_id, "debug_batch") )
+    if ( !scripts\zm\ee\ee_progress::complete_step_substeps(step_id, "debug_batch") )
     {
         player iprintln("^1[EE Debug] ^7Step non trovato.");
         return false;
@@ -40,14 +33,14 @@ debug_complete_step_full(player, step_id)
 
 debug_dump_status(player)
 {
-    player iprintln("^3[EE Debug] ^7Quest: " + level.ee.quest_id + " | Active: " + ee\ee_progress::get_active_step_id());
+    player iprintln("^3[EE Debug] ^7Quest: " + level.ee.quest_id + " | Active: " + scripts\zm\ee\ee_progress::get_active_step_id());
 
     for ( i = 0; i < level.ee.steps.size; i++ )
     {
         step = level.ee.steps[i];
-        state = ee\ee_progress::get_step_state(step.id);
-        done = ee\ee_progress::get_step_substep_done_count(step.id);
-        total = ee\ee_progress::get_step_substep_total(step.id);
+        state = scripts\zm\ee\ee_progress::get_step_state(step.id);
+        done = scripts\zm\ee\ee_progress::get_step_substep_done_count(step.id);
+        total = scripts\zm\ee\ee_progress::get_step_substep_total(step.id);
         player iprintln("^3[EE Debug] ^7" + step.id + " ^8(" + state + " " + done + "/" + total + "^8)");
     }
 }
@@ -147,7 +140,7 @@ apply_preset_steps(player, success_msg, next_step, steps)
         debug_complete_step_full(player, steps[i]);
 
     if ( next_step != "" )
-        ee\ee_progress::set_active_step(next_step);
+        scripts\zm\ee\ee_progress::set_active_step(next_step);
 
     player iprintln("^3[EE Debug] ^7" + success_msg);
     return true;

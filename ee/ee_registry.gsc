@@ -1,4 +1,5 @@
-#include ee\maps\origins_ee;
+#include maps\mp\_utility;
+#include common_scripts\utility;
 
 resolve_map()
 {
@@ -38,7 +39,7 @@ register_map_module()
     switch ( level.ee_map_id )
     {
         case "origins":
-            ee\maps\origins_ee::register();
+            scripts\zm\ee\maps\origins_ee::register();
             return true;
     }
 

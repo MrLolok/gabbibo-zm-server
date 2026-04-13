@@ -1291,11 +1291,11 @@ parts_esp_monitor()
 
 update_hp_label()
 {
-    text = "^5HP / SCUDO";
+    text = "";
 
     if(isDefined(self.parts_focus_text) && self.parts_focus_text != "")
     {
-        text += "\n" + self.parts_focus_text;
+        text = self.parts_focus_text;
     }
 
     if(!isDefined(self.hp_text))
